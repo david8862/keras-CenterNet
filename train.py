@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Copyright 2017-2018 Fizyr (https://fizyr.com)
 
@@ -13,16 +15,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-
-import argparse
+import os, sys, argparse
 from datetime import date, timedelta
 import keras
 import keras.backend as K
 from keras.optimizers import Adam, SGD
-import keras.preprocessing.image
-import os
-import sys
-import tensorflow as tf
+#import keras.preprocessing.image
 
 from augmentor.color import VisualEffect
 from augmentor.misc import MiscEffect
@@ -44,9 +42,11 @@ def get_session():
     """
     Construct a modified tf session.
     """
+    import tensorflow as tf
     config = tf.ConfigProto()
     # 根据程序需要来增加 gpu 的内存
     config.gpu_options.allow_growth = True
+    config.gpu_options.per_process_gpu_memory_fraction = 0.9
     return tf.Session(config=config)
 
 
@@ -101,7 +101,7 @@ def create_callbacks(training_model, prediction_model, validation_generator, arg
                 '{dataset_type}_{{epoch:02d}}_{{loss:.4f}}_{{val_loss:.4f}}.h5'.format(dataset_type=args.dataset_type)
             ),
             verbose=1,
-            # save_best_only=True,
+            save_best_only=True,
             # monitor="mAP",
             # mode='max'
         )
@@ -233,12 +233,65 @@ def check_args(parsed_args):
     return parsed_args
 
 
-def parse_args(args):
+def main(args):
+    # optionally choose specific GPU
+    if args.gpu:
+        os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
+    K.set_session(get_session())
+
+    # create the generators
+    train_generator, validation_generator = create_generators(args)
+
+    num_classes = train_generator.num_classes()
+    model, prediction_model, debug_model = centernet(num_classes=num_classes, input_size=args.input_size,
+                                                     freeze_bn=True)
+    # create the model
+    print('Loading model, this may take a second...')
+    model.load_weights(args.snapshot, by_name=True, skip_mismatch=True)
+
+    # freeze layers
+    if args.freeze_backbone:
+        for i in range(190):
+            model.layers[i].trainable = False
+
+
+    # compile model
+    model.compile(optimizer=Adam(lr=1e-3), loss={'centernet_loss': lambda y_true, y_pred: y_pred})
+    # model.compile(optimizer=SGD(lr=1e-5, momentum=0.9, nesterov=True, decay=1e-5),
+    #               loss={'centernet_loss': lambda y_true, y_pred: y_pred})
+
+    # create the callbacks
+    callbacks = create_callbacks(model, prediction_model, validation_generator, args)
+
+    if not args.compute_val_loss:
+        validation_generator = None
+
+    # start training
+    model.fit_generator(
+        generator=train_generator,
+        steps_per_epoch=args.steps,
+        initial_epoch=0,
+        epochs=args.epochs,
+        verbose=1,
+        callbacks=callbacks,
+        workers=args.workers,
+        use_multiprocessing=args.multiprocessing,
+        max_queue_size=args.max_queue_size,
+        validation_data=validation_generator
+    )
+    model.save(os.path.join(args.snapshot_path, 'trained_final.h5'))
+
+    return
+
+
+if __name__ == '__main__':
     """
     Parse the arguments.
     """
     today = str(date.today() + timedelta(days=0))
-    parser = argparse.ArgumentParser(description='Simple training script for training a RetinaNet network.')
+    parser = argparse.ArgumentParser(description='Simple training script for training a CenterNet network.')
+
+    # dataset subparsers
     subparsers = parser.add_subparsers(help='Arguments for specific dataset types.', dest='dataset_type')
     subparsers.required = True
 
@@ -255,10 +308,10 @@ def parse_args(args):
                             help='Path to CSV file containing annotations for validation (optional).')
 
     parser.add_argument('--snapshot', help='Resume training from a snapshot.',
-                        default='/home/adam/.keras/models/ResNet-50-model.keras.h5')
+                        default='checkpoints/ResNet-50-model.keras.h5')
     parser.add_argument('--freeze-backbone', help='Freeze training of backbone layers.', action='store_true')
 
-    parser.add_argument('--batch-size', help='Size of the batches.', default=1, type=int)
+    parser.add_argument('--batch-size', help='Size of the batches.', default=16, type=int)
     parser.add_argument('--gpu', help='Id of the GPU to use (as reported by nvidia-smi).')
     parser.add_argument('--num_gpus', help='Number of GPUs to use for parallel processing.', type=int, default=0)
     parser.add_argument('--multi-gpu-force', help='Extra flag needed to enable (experimental) multi-gpu support.',
@@ -285,72 +338,9 @@ def parse_args(args):
     parser.add_argument('--workers', help='Number of generator workers.', type=int, default=1)
     parser.add_argument('--max-queue-size', help='Queue length for multiprocessing workers in fit_generator.', type=int,
                         default=10)
-    print(vars(parser.parse_args(args)))
-    return check_args(parser.parse_args(args))
 
+    args = parser.parse_args()
+    print(vars(args))
+    check_args(args)
 
-def main(args=None):
-    # parse arguments
-    if args is None:
-        args = sys.argv[1:]
-    args = parse_args(args)
-
-    # optionally choose specific GPU
-    if args.gpu:
-        os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-
-    K.set_session(get_session())
-
-    # create the generators
-    train_generator, validation_generator = create_generators(args)
-
-    num_classes = train_generator.num_classes()
-    model, prediction_model, debug_model = centernet(num_classes=num_classes, input_size=args.input_size,
-                                                     freeze_bn=True)
-
-    # create the model
-    print('Loading model, this may take a second...')
-    model.load_weights(args.snapshot, by_name=True, skip_mismatch=True)
-
-    # freeze layers
-    if args.freeze_backbone:
-        for i in range(190):
-        # for i in range(175):
-            model.layers[i].trainable = False
-
-    # compile model
-    model.compile(optimizer=Adam(lr=1e-3), loss={'centernet_loss': lambda y_true, y_pred: y_pred})
-    # model.compile(optimizer=SGD(lr=1e-5, momentum=0.9, nesterov=True, decay=1e-5),
-    #               loss={'centernet_loss': lambda y_true, y_pred: y_pred})
-
-    # print model summary
-    # print(model.summary())
-
-    # create the callbacks
-    callbacks = create_callbacks(
-        model,
-        prediction_model,
-        validation_generator,
-        args,
-    )
-
-    if not args.compute_val_loss:
-        validation_generator = None
-
-    # start training
-    return model.fit_generator(
-        generator=train_generator,
-        steps_per_epoch=args.steps,
-        initial_epoch=0,
-        epochs=args.epochs,
-        verbose=1,
-        callbacks=callbacks,
-        workers=args.workers,
-        use_multiprocessing=args.multiprocessing,
-        max_queue_size=args.max_queue_size,
-        validation_data=validation_generator
-    )
-
-
-if __name__ == '__main__':
-    main()
+    main(args)

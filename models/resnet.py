@@ -1,5 +1,9 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 from keras_resnet import models as resnet_models
 from keras.applications.resnet50 import ResNet50
+from keras.applications.mobilenet import MobileNet
+from keras.applications.mobilenet_v2 import MobileNetV2
 from keras.layers import Input, Conv2DTranspose, BatchNormalization, ReLU, Conv2D, Lambda, MaxPooling2D, Dropout
 from keras.layers import ZeroPadding2D
 from keras.models import Model
@@ -110,13 +114,13 @@ def decode(hm, wh, reg, max_objects=100, nms=True, flip_test=False, num_classes=
     return detections
 
 
-def centernet(num_classes, backbone='resnet50', input_size=512, max_objects=100, score_threshold=0.1,
+def centernet(num_classes, backbone='mobilenet', input_size=512, max_objects=100, score_threshold=0.1,
               nms=True,
               flip_test=False,
               freeze_bn=True):
-    assert backbone in ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152']
+    assert backbone in ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152', 'mobilenet', 'mobilenet_v2']
     output_size = input_size // 4
-    image_input = Input(shape=(None, None, 3))
+    image_input = Input(shape=(input_size, input_size, 3))
     hm_input = Input(shape=(output_size, output_size, num_classes))
     wh_input = Input(shape=(max_objects, 2))
     reg_input = Input(shape=(max_objects, 2))
@@ -124,20 +128,25 @@ def centernet(num_classes, backbone='resnet50', input_size=512, max_objects=100,
     index_input = Input(shape=(max_objects,))
 
     if backbone == 'resnet18':
-        resnet = resnet_models.ResNet18(image_input, include_top=False, freeze_bn=freeze_bn)
+        backbone_model = resnet_models.ResNet18(image_input, include_top=False, freeze_bn=freeze_bn)
     elif backbone == 'resnet34':
-        resnet = resnet_models.ResNet34(image_input, include_top=False, freeze_bn=freeze_bn)
+        backbone_model = resnet_models.ResNet34(image_input, include_top=False, freeze_bn=freeze_bn)
     elif backbone == 'resnet50':
-        resnet = resnet_models.ResNet50(image_input, include_top=False, freeze_bn=freeze_bn)
-        # resnet = ResNet50(input_tensor=image_input, include_top=False)
+        backbone_model = resnet_models.ResNet50(image_input, include_top=False, freeze_bn=freeze_bn)
+        # backbone_model = ResNet50(input_tensor=image_input, include_top=False)
     elif backbone == 'resnet101':
-        resnet = resnet_models.ResNet101(image_input, include_top=False, freeze_bn=freeze_bn)
-    else:
-        resnet = resnet_models.ResNet152(image_input, include_top=False, freeze_bn=freeze_bn)
+        backbone_model = resnet_models.ResNet101(image_input, include_top=False, freeze_bn=freeze_bn)
+    elif backbone == 'resnet152':
+        backbone_model = resnet_models.ResNet152(image_input, include_top=False, freeze_bn=freeze_bn)
+    elif backbone == 'mobilenet':
+        backbone_model = MobileNet(input_tensor=image_input, include_top=False)
+    elif backbone == 'mobilenet_v2':
+        backbone_model = MobileNetV2(input_tensor=image_input, include_top=False)
+
 
     # (b, 16, 16, 2048)
-    C5 = resnet.outputs[-1]
-    # C5 = resnet.get_layer('activation_49').output
+    C5 = backbone_model.outputs[-1]
+    # C5 = backbone_model.get_layer('activation_49').output
 
     x = Dropout(rate=0.5)(C5)
     # decoder
