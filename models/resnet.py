@@ -120,7 +120,7 @@ def centernet(num_classes, backbone='mobilenet', input_size=512, max_objects=100
               freeze_bn=True):
     assert backbone in ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152', 'mobilenet', 'mobilenet_v2']
     output_size = input_size // 4
-    image_input = Input(shape=(input_size, input_size, 3))
+    image_input = Input(shape=(None, None, 3))
     hm_input = Input(shape=(output_size, output_size, num_classes))
     wh_input = Input(shape=(max_objects, 2))
     reg_input = Input(shape=(max_objects, 2))

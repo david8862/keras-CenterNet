@@ -23,6 +23,12 @@ Pretrained centernet model is here. [baidu netdisk](https://pan.baidu.com/s/1nZz
 
 
 ## Train
+### install requirement
+```
+# pip install -r requirements.txt
+# cd utils && python setup.py build_ext --inplace
+```
+
 ### build dataset (Pascal VOC, other types please refer to [fizyr/keras-retinanet](https://github.com/fizyr/keras-retinanet))
 * Download VOC2007 and VOC2012, copy all image files from VOC2007 to VOC2012.
 * Append VOC2007 train.txt to VOC2012 trainval.txt.
